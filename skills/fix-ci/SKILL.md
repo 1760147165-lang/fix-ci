@@ -1,13 +1,13 @@
 ---
 name: fix-ci
-description: Write, revise, translate, and automatically audit academic manuscripts in Chinese or English, including evidence-based responses to supervisor or peer-review comments. Use when the user asks for paper drafting, scholarly editing, annotated-manuscript revision, reviewer-response checking, translation, journal-format compliance, citation checks, or an independent quality review; do not use for ordinary non-academic prose.
+description: Write, revise, translate, and audit Chinese or English academic manuscripts through automatic task decomposition, orchestrator-led Writer/Reviewer routing, and evidence-based QA loops. Use for paper drafting, scholarly editing, annotated-manuscript revision, reviewer-response checking, translation, journal-format compliance, citation checks, or independent quality review; do not use for ordinary non-academic prose or software CI repair.
 metadata:
-  short-description: Bilingual academic writing and review workflow
+  short-description: Bilingual academic writing with task routing and QA
 ---
 
 # Academic Writing and Review
 
-Act as the manuscript orchestrator. The goal is a submission-ready paper (or a precise, evidence-based audit), while preserving the author's intent, data, references, and requested scope.
+Act as the manuscript orchestrator. Turn the user's writing or revision request into scoped, verifiable subtasks and carry them through writing, review, correction, and final integration. The goal is a submission-ready paper (or a precise, evidence-based audit), while preserving the author's intent, data, references, and requested scope.
 
 ## Operating principles
 
@@ -47,7 +47,9 @@ Language rules: Chinese academic / English academic
 
 If the target journal is unknown, use a neutral academic style and state that journal-specific compliance is unverified. Ask for human input only when requirements conflict, raw data are unavailable, a domain dispute cannot be resolved from supplied sources, a translation term has materially different accepted meanings, or a journal choice changes the acceptance criteria.
 
-## 2. Requirement trace and module plan
+Resolve formatting separately from language detection: explicit user and journal/template requirements -> identifiable existing manuscript style -> disclosed language defaults. Use the resulting profile for citations, reference entries, headings, captions, punctuation, numbers, and units. Language alone does not determine APA, Vancouver, GB/T, or any journal's complete format. Preserve a coherent existing citation style when no change is requested; verify supplied rules when tools permit, and mark unavailable checks as `NOT_VERIFIED`.
+
+## 2. Automatic decomposition and orchestrator routing
 
 Convert each requirement into an ID with an acceptance condition and evidence location. Keep a compact trace in the workspace when the task spans multiple turns, for example `.codex/paper-qa-state.md` (create it only if useful):
 
@@ -56,7 +58,26 @@ REQ-001 | mandatory | Abstract reports the final sample size | Abstract, Results
 REQ-002 | mandatory | References use GB/T 7714-2015 | References | OPEN
 ```
 
-Split work into independently verifiable modules. Typical experimental-paper modules are: title/abstract/keywords, introduction, methods, results, discussion, conclusions, references, figures/tables, and cross-section consistency. For reviews use thematic sections; for theory papers use framework/derivations; for case studies use context/case/analysis/lessons. Process dependent modules in order; do not enter the next module while a mandatory finding remains unresolved.
+Automatically split the request into independently verifiable tasks before substantive writing, without waiting for the user to supply a task list. Size tasks to the requested scope: a sentence edit may be one task, while a multi-section revision needs several. Typical experimental-paper modules are title/abstract/keywords, introduction, methods, results, discussion, conclusions, references, figures/tables, and cross-section consistency. For reviews use thematic sections; for theory papers use framework/derivations; for case studies use context/case/analysis/lessons. Include only the modules needed for the request.
+
+Give each task a compact contract and keep it with the requirement trace (in a workspace file when available, otherwise in the conversation):
+
+```text
+TASK-001 | objective | REQ IDs | source evidence | editable scope/output | dependencies | acceptance checks | writer/reviewer IDs or sequential mode | revision/round | state | review evidence
+```
+
+Use `WAITING`, `READY`, `WRITING`, `REVIEWING`, `REWORK`, `PASS`, and `BLOCKED` as task states. Map every requirement to at least one task and every task to an authorized requirement. Link acceptance checks to inspectable output, source passages, data, or checks; a writer's completion claim is insufficient. Order tasks by actual dependencies, including downstream consistency checks. An unresolved prerequisite keeps its dependent task `WAITING`.
+
+### Orchestrator responsibilities
+
+1. Show a concise task outline and the language/style profile, then start the first ready task. Continue authorized, resolvable work without asking the user to approve each task, review, or rewrite.
+2. When the host provides permitted subagents, assign writing and reviewing to separate agent identities. Give the Writer the task contract and source evidence; give the Reviewer the same requirements, relevant evidence, and the actual saved output with a revision identifier. The Reviewer must not depend on the Writer's account of what is correct. Keep private drafts and edits within the task's authorized environment.
+3. Keep the Reviewer read-only. Never let one agent write and independently approve the same task. Reuse role-specific agents when helpful, keeping context scoped; independent tasks may run concurrently only with non-overlapping writes.
+4. Route every produced task revision to review. On `PARTIAL` or `FAIL`, send concrete findings, evidence, and acceptance conditions back to the Writer. The Writer fixes the assigned issues, and the Reviewer reads the new output and affected dependencies. Update revision, round, and unresolved findings each time.
+5. Mark `PASS` only when the current artifact satisfies every mandatory acceptance check with evidence and has no unresolved mandatory finding. If verification needs missing evidence, retain `NOT_VERIFIED` in the requirement/review record and mark the task `BLOCKED`; never turn uncertainty into approval. Unlock the next dependent task only after the prerequisite passes.
+6. Once all required tasks pass, run a fresh integration review over the deliverable and relevant dependencies. Reopen affected tasks if integration uncovers a regression, then repeat the necessary local and integration checks before delivery. For a targeted edit, inspect relevant dependencies without rewriting unrelated sections.
+
+For review-only requests, route tasks directly to the Reviewer and deliver findings; do not activate manuscript-writing or auto-fix steps without a revision request. If subagents are unavailable or disallowed, execute writing and review as separate sequential passes, disclose `sequential self-review`, and preserve the task/check records. Do not claim independent multi-agent review in that mode. If the host lacks tools required by a check, record that limitation explicitly.
 
 For reviewer-comment work, create a separate trace entry for every comment, including terse replacements, question marks, and visual/layout remarks. A comment is complete only when its intended acceptance condition is satisfied in the revised manuscript and verified in the affected dependencies; comment deletion, a changed anchor, or a lower comment count is not evidence of completion.
 
@@ -119,7 +140,7 @@ Known uncertainty or missing evidence: ...
 
 Review the actual manuscript and surrounding context independently of the writer's completion claim. Read requirements, relevant source evidence, and the modified section; use diffs as an aid, not as the only input. Do not edit manuscript files.
 
-When multi-agent execution is available, run Writer and Reviewer in separate, isolated roles or threads. Never run two write-capable agents against the same section concurrently. Without subagents, perform the writer pass and reviewer pass sequentially and keep the same prohibition on self-approval.
+Follow the orchestrator's role assignment. When permitted multi-agent execution is available, run Writer and Reviewer as separate agents; a Reviewer must not have authored the task revision under review. Never run two write-capable agents against the same section concurrently. In sequential mode, re-read the artifact and evidence in a separate review pass and label the result as self-review rather than independent approval.
 
 Check at least:
 
@@ -151,6 +172,8 @@ Return:
 ```text
 REVIEW_RESULT
 Module: ...
+Task / artifact revision / round: ...
+Review mode / reviewer identity: independent-agent ... | sequential self-review
 Verdict: PASS | PARTIAL | FAIL | NOT_VERIFIED
 
 Requirement checks:
@@ -178,7 +201,9 @@ For each module, run:
 
 Perform the semantic and logical audit at least twice: first at sentence and paragraph level within the module, then across the whole manuscript during final QA. The first pass removes repeated meaning and verifies local causal links; the second pass checks cross-section repetition, causal continuity, author-defined term introductions, and consistency between claims and evidence.
 
-If the verdict is `PASS`, record evidence in the trace and continue. For `PARTIAL`, `FAIL`, or `NOT_VERIFIED`, route only the structured findings and acceptance conditions back to the writer. Re-review the changed module and its dependencies. Do not broaden a targeted fix into an unrequested rewrite. Stop and surface a human blocker when the reviewer cannot verify a mandatory claim without unavailable data or when two mandatory requirements conflict.
+For writing and revision tasks, repeat `REWORK -> REVIEWING` automatically until the current output passes all mandatory acceptance checks. Record evidence, mark the task `PASS`, and proceed to the next ready task. Re-review changed content and affected dependencies after each repair; do not broaden a targeted fix into an unrequested rewrite or weaken the original acceptance conditions.
+
+Keep the loop evidence-driven. If two consecutive repair-and-review rounds leave the same mandatory findings unresolved with no substantive progress, diagnose the cause before another attempt. Continue when a concrete, supported correction is available; if required data, tools, authority, or a non-conflicting requirement cannot be obtained, mark the task `BLOCKED` and report the exact missing input or decision. Preserve completed work and continue independent tasks that do not rely on the blocker. Respect host resource limits, checkpoint unfinished tasks, and never claim completion because a round limit was reached. Review-only tasks report findings without entering the rewrite loop.
 
 ## 6. Language defaults
 
@@ -207,6 +232,7 @@ Use supplied journal rules first. Otherwise apply these conservative defaults an
 ### Bilingual papers
 
 - Use direct, plain language when answering questions or presenting recommendations. State the view or recommendation directly in a friendly, equal tone.
+- Keep both Chinese and English manuscript prose evidence-led and specific. Remove unsolicited lessons to the reader, patronizing directives (such as `你必须明白` / `you need to understand`), generic motivational conclusions, and empty reminders (`值得注意的是` / `it is worth noting` when they add no information). State the finding, evidence, limitation, or concrete next action directly. Preserve necessary scientific qualifications and authorial voice; do not mistake a substantive caution for a tone defect.
 - Avoid negative-contrast constructions in any form, including patterns equivalent to `不是……而是……`, `不应该……应该……`, `与其……不如……`, and `不要……要……`. Rewrite them as direct affirmative statements. For example, write `使用局部变量可以避免命名冲突和意外修改` and `这是内存泄漏导致的`.
 - When a reference template is supplied for a bilingual paper, follow every formatting detail in it strictly, including font, font size, paragraph spacing, and line spacing.
 
@@ -241,6 +267,8 @@ For a whole-paper audit, end with this compact summary:
 ```text
 FINAL_QA
 Target language / standards: ...
+Execution mode: independent multi-agent | sequential self-review
+Tasks: PASS n | BLOCKED n | remaining n; review rounds and artifact evidence: ...
 Requirements: PASS n | PARTIAL n | FAIL n | NOT_VERIFIED n
 Reviewer comments: RESOLVED n | PARTIAL n | UNRESOLVED n | NOT_VERIFIED n
 Integration checks: abstract-results ... | introduction-discussion ... | figures/tables ...
@@ -254,5 +282,5 @@ Evidence gaps / user decisions needed: ... or none
 When invoked on an existing project, begin with:
 
 ```text
-Read the requirement document and manuscript, detect the target language, identify the applicable journal/style rules, build a requirement trace, and split the work into verifiable modules. Use a writer pass followed by an independent reviewer pass for each module, route only concrete findings for revision, and run a fresh final QA. Do not modify requirements, invent evidence, or finish with unresolved mandatory findings.
+Read the requirements and manuscript, detect the target language, resolve the journal/style profile, and automatically map requirements to scoped tasks with dependencies and acceptance checks. As Orchestrator, dispatch each ready task to a Writer and a separate read-only Reviewer when the host permits it. Route concrete findings through automatic revision and re-review until the task passes, then advance to the next dependent task and finish with integration QA. For review-only requests, report findings without editing. Disclose sequential self-review when independent agents are unavailable. Preserve evidence, report blockers, and never lower requirements or invent facts to obtain a pass.
 ```
